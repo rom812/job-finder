@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Finder - AI-Powered Job Matching</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="loading-screen">
+            <div class="loading-content">
+                <div class="loader">
+                    <div class="loader-inner"></div>
+                </div>
+                <h2>Analyzing Job Matches</h2>
+                <p>Processing your career opportunities...</p>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <div id="dashboard" class="job-dashboard" style="display: none;">
+            <!-- Header -->
+            <header class="dashboard-header">
+                <div class="header-content">
+                    <div class="header-left">
+                        <h1>Job Matches</h1>
+                        <div id="search-info" class="search-info"></div>
+                    </div>
+                    <button class="refresh-btn" onclick="refreshData()">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </header>
+
+            <!-- Stats -->
+            <div id="stats" class="job-stats"></div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <div class="filters" id="filters"></div>
+                <div class="sort-controls">
+                    <label>Sort by:</label>
+                    <select id="sort-select" onchange="sortJobs(this.value)">
+                        <option value="score">Match Score</option>
+                        <option value="date">Posted Date</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Jobs Grid -->
+            <div id="jobs-grid" class="jobs-grid"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
