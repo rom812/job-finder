@@ -44,11 +44,13 @@ class JobFinderPipeline:
 
         # Initialize all agents
         self.cv_analyzer = CVAnalyzer()
-        self.job_scraper = JobScraper()
+        # Use ONLY FireCrawl for job search (as per requirement)
+        self.job_scraper = JobScraper(use_brave_search=False, use_firecrawl=True)
         self.news_agent = NewsAgent()
         self.matcher = SmartMatcher()
 
         print("✅ Pipeline initialized with 4 agents")
+        print("🔥 Note: Using FireCrawl for job search")
 
     async def run(
         self,
@@ -85,25 +87,29 @@ class JobFinderPipeline:
         print("🎯 JOB FINDER PIPELINE - START")
         print("=" * 80)
 
-        # Stage 1: Analyze CV and Search Jobs (in parallel!)
-        print("\n📊 Stage 1: CV Analysis + Job Search (parallel)")
+        # Stage 1a: Analyze CV first (to get experience level)
+        print("\n📊 Stage 1a: CV Analysis")
         print("-" * 80)
 
-        cv_task = self._run_cv_analyzer(cv_path)
-        jobs_task = self._run_job_scraper(job_title, location, num_jobs)
+        cv_analysis = await self._run_cv_analyzer(cv_path)
 
-        # Run both in parallel using asyncio.gather
-        cv_analysis, jobs = await asyncio.gather(cv_task, jobs_task)
-
-        print(f"\n✅ Stage 1 Complete!")
+        print(f"\n✅ Stage 1a Complete!")
         print(f"   CV Analysis: {len(cv_analysis.skills)} skills, {cv_analysis.experience_level} level")
-        print(f"   Jobs Found: {len(jobs)} jobs")
+
+        # Stage 1b: Search Jobs (using CV experience level for better matching)
+        print(f"\n🔍 Stage 1b: Job Search (targeted to {cv_analysis.experience_level} level)")
+        print("-" * 80)
+
+        jobs = await self._run_job_scraper(job_title, location, num_jobs, cv_analysis.experience_level)
+
+        print(f"\n✅ Stage 1b Complete!")
+        print(f"   Jobs Found: {len(jobs)} jobs (targeted for {cv_analysis.experience_level} level)")
 
         # Stage 2: Get Company Insights (parallel for all jobs)
         print("\n🗞️  Stage 2: Company Insights (parallel for all jobs)")
         print("-" * 80)
 
-        company_insights = await self._run_news_agent(jobs)
+        company_insights = await self._run_news_agent(jobs, desired_role=job_title)
 
         print(f"\n✅ Stage 2 Complete!")
         print(f"   Company Insights: {len(company_insights)} companies analyzed")
@@ -151,7 +157,8 @@ class JobFinderPipeline:
         self,
         job_title: str,
         location: Optional[str],
-        num_jobs: int
+        num_jobs: int,
+        experience_level: str = "Mid"
     ) -> List[Job]:
         """
         Stage 1b: Search for jobs
@@ -160,6 +167,7 @@ class JobFinderPipeline:
             job_title: Job title to search
             location: Optional location
             num_jobs: Number of jobs
+            experience_level: Experience level from CV analysis
 
         Returns:
             List of Job objects
@@ -169,17 +177,19 @@ class JobFinderPipeline:
         if location:
             print(f"   Location: {location}")
         print(f"   Number of jobs: {num_jobs}")
+        print(f"   Experience Level: {experience_level}")
 
-        jobs = await self.job_scraper.search(job_title, location, num_jobs)
+        jobs = await self.job_scraper.search(job_title, location, num_jobs, experience_level)
 
         return jobs
 
-    async def _run_news_agent(self, jobs: List[Job]) -> List[CompanyInsights]:
+    async def _run_news_agent(self, jobs: List[Job], desired_role: str = "") -> List[CompanyInsights]:
         """
         Stage 2: Get company insights for all jobs (in parallel)
 
         Args:
             jobs: List of Job objects
+            desired_role: The role being applied for (enables AI analysis)
 
         Returns:
             List of CompanyInsights objects
@@ -188,8 +198,9 @@ class JobFinderPipeline:
         print(f"   Analyzing {len(jobs)} companies...")
 
         # Create tasks for all companies (parallel!)
+        # Pass the role for AI-powered filtering of Reddit insights
         tasks = [
-            self.news_agent.get_insights(job.company)
+            self.news_agent.get_insights(job.company, role=desired_role or job.title)
             for job in jobs
         ]
 
@@ -280,18 +291,30 @@ class JobFinderPipeline:
             for reason in match.reasoning[:4]:
                 print(f"   • {reason}")
 
-            # Reddit & company insights
-            print(f"\n🗣️  Company Insights (Reddit):")
+            # Company insights with AI Summary
+            print(f"\n🗣️  Company Insights:")
             print(f"   Overall Sentiment: {match.company_insights.reddit_sentiment.upper()}")
 
-            if match.company_insights.reddit_highlights:
-                print(f"   Recent Discussions:")
+            # AI Summary - THE MOST IMPORTANT PART!
+            if match.company_insights.ai_summary:
+                print(f"\n🤖 AI Interview Prep Brief:")
+                print(f"{'─' * 100}")
+                # Format AI summary nicely with indentation
+                for line in match.company_insights.ai_summary.split('\n'):
+                    if line.strip():
+                        print(f"   {line}")
+                print(f"{'─' * 100}")
+
+            # Reddit highlights (if any) - now secondary
+            elif match.company_insights.reddit_highlights:
+                print(f"\n   Reddit Discussions:")
                 for j, highlight in enumerate(match.company_insights.reddit_highlights[:2], 1):
                     clean_highlight = highlight.strip()[:180]
                     print(f"      {j}. {clean_highlight}...")
 
-            if match.company_insights.culture_notes:
-                print(f"   Culture Notes:")
+            # Culture notes (if any and no AI summary)
+            if not match.company_insights.ai_summary and match.company_insights.culture_notes:
+                print(f"\n   Culture Notes:")
                 for note in match.company_insights.culture_notes[:2]:
                     clean_note = note.strip()[:150]
                     print(f"      • {clean_note}...")

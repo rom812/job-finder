@@ -1,13 +1,20 @@
 """
 Agent 2: Job Scraper
-Searches for jobs using JSearch API (RapidAPI)
+Searches for jobs using multiple sources:
+- JSearch API (job boards)
+- Brave Search (web-wide search)
+With smart query expansion that expands informal queries to formal job titles
 """
 
 import os
+import json
 from typing import List, Optional
 from dotenv import load_dotenv
+from openai import OpenAI
 
 from models.models import Job
+from agents.brave_search import BraveSearchAgent
+from agents.firecrawl_scraper import FireCrawlJobScraper
 
 # Load environment variables
 load_dotenv()
@@ -17,22 +24,139 @@ class JobScraper:
     """
     Agent 2: Job Scraper
 
-    Searches for jobs from job boards using JSearch API.
-    Requires JSEARCH_API_KEY in environment variables.
+    Searches for jobs from multiple sources:
+    - JSearch API (job boards)
+    - Brave Search API (web-wide search)
+
+    Requires API keys in environment variables.
     """
 
-    def __init__(self):
-        """Initialize the Job Scraper"""
-        self.api_key = os.getenv("JSEARCH_API_KEY")
-        self.api_host = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
+    def __init__(self, use_brave_search: bool = True, use_firecrawl: bool = True):
+        """
+        Initialize the Job Scraper with multiple search sources
 
-        # Validate API key is present
-        if not self.api_key:
-            raise ValueError(
-                "JSEARCH_API_KEY not found in environment variables. "
-                "Please add it to your .env file. "
-                "Get your key at: https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch"
+        Args:
+            use_brave_search: Whether to include Brave Search results (default: True)
+            use_firecrawl: Whether to include FireCrawl results (default: True)
+        """
+        # OpenAI setup (for query expansion)
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        if not openai_api_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+
+        self.openai_client = OpenAI(api_key=openai_api_key)
+        print("✅ OpenAI initialized (for smart query expansion)")
+
+        # JSearch setup
+        self.jsearch_api_key = os.getenv("JSEARCH_API_KEY")
+        self.jsearch_api_host = os.getenv("RAPIDAPI_HOST", "jsearch.p.rapidapi.com")
+
+        if not self.jsearch_api_key:
+            print("⚠️  JSEARCH_API_KEY not found - JSearch will be skipped")
+            self.use_jsearch = False
+        else:
+            self.use_jsearch = True
+            print("✅ JSearch API initialized")
+
+        # Brave Search setup
+        self.use_brave_search = use_brave_search
+        if use_brave_search:
+            try:
+                self.brave_agent = BraveSearchAgent()
+                print("✅ Brave Search initialized")
+            except ValueError as e:
+                print(f"⚠️  Brave Search not available: {e}")
+                self.use_brave_search = False
+
+        # FireCrawl setup
+        self.use_firecrawl = use_firecrawl
+        if use_firecrawl:
+            try:
+                self.firecrawl_scraper = FireCrawlJobScraper()
+                print("✅ FireCrawl initialized")
+            except ValueError as e:
+                print(f"⚠️  FireCrawl not available: {e}")
+                self.use_firecrawl = False
+
+    def _expand_job_query(self, user_query: str, experience_level: str = "Mid") -> List[str]:
+        """
+        Expand informal user query to formal job titles using OpenAI
+
+        Example:
+            Input: "ai student"
+            Output: ["AI Intern", "Junior AI Engineer", "AI Research Assistant", "Machine Learning Intern"]
+
+        Args:
+            user_query: Informal job search query from user
+            experience_level: Experience level ("Junior", "Mid", "Senior", "Lead")
+
+        Returns:
+            List of formal job titles (3-5 variations)
+        """
+        print(f"🤖 Expanding query: '{user_query}' (Level: {experience_level})...")
+
+        # Adjust prompt based on experience level
+        level_guidance = {
+            "Junior": "Focus on entry-level positions like: Junior, Associate, Entry Level, Graduate roles",
+            "Mid": "Focus on mid-level positions like: Developer, Engineer, Specialist (no seniority prefix)",
+            "Senior": "Focus on senior positions like: Senior, Lead, Principal, Staff Engineer",
+            "Lead": "Focus on leadership positions like: Lead, Principal, Staff, Engineering Manager"
+        }
+
+        guidance = level_guidance.get(experience_level, level_guidance["Mid"])
+
+        prompt = f"""
+You are a job search expert. Convert this job search query into 3-5 formal, professional job titles appropriate for a {experience_level} level candidate.
+
+User query: "{user_query}"
+Experience Level: {experience_level}
+
+{guidance}
+
+Return ONLY a JSON array of formal job titles, nothing else.
+
+Example for Junior level:
+User query: "Backend Developer"
+Output: ["Junior Backend Developer", "Backend Developer - Entry Level", "Associate Backend Engineer", "Backend Software Engineer - Junior"]
+
+Example for Mid level:
+User query: "Backend Developer"
+Output: ["Backend Developer", "Backend Software Engineer", "Server-Side Developer", "Backend Engineer"]
+
+Example for Senior level:
+User query: "Backend Developer"
+Output: ["Senior Backend Developer", "Senior Backend Engineer", "Lead Backend Developer", "Principal Backend Engineer"]
+
+Now convert for {experience_level} level: "{user_query}"
+Output:
+"""
+
+        try:
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                timeout=30
             )
+
+            result = response.choices[0].message.content.strip()
+
+            # Remove markdown code block if present (```json ... ```)
+            if result.startswith("```"):
+                # Remove first line (```json or ```), last line (```), and parse middle
+                lines = result.split('\n')
+                result = '\n'.join(lines[1:-1]).strip()
+
+            # Parse JSON array
+            job_titles = json.loads(result)
+
+            print(f"   ✅ Expanded to {len(job_titles)} queries: {', '.join(job_titles)}")
+            return job_titles
+
+        except Exception as e:
+            print(f"   ⚠️  Query expansion failed: {e}")
+            print(f"   → Using original query: '{user_query}'")
+            return [user_query]  # Fallback to original
 
     def _get_mock_jobs(self, job_title: str, location: Optional[str] = None, num_jobs: int = 20) -> List[Job]:
         """
@@ -223,8 +347,8 @@ class JobScraper:
         url = "https://jsearch.p.rapidapi.com/search"
 
         headers = {
-            "X-RapidAPI-Key": self.api_key,
-            "X-RapidAPI-Host": self.api_host
+            "X-RapidAPI-Key": self.jsearch_api_key,
+            "X-RapidAPI-Host": self.jsearch_api_host
         }
 
         # Strategy 1: Try with location in query
@@ -344,33 +468,255 @@ class JobScraper:
 
         return jobs
 
-    async def search(self, job_title: str, location: Optional[str] = None, num_jobs: int = 20) -> List[Job]:
+    async def _search_adzuna_api(self, job_title: str, location: Optional[str] = None, num_jobs: int = 20) -> List[Job]:
         """
-        Main method: Search for jobs using JSearch API
+        Search jobs using Adzuna API
+        EXCELLENT for Israeli jobs! Supports country=il natively.
 
         Args:
             job_title: Job title to search for (e.g., "Python Developer")
-            location: Optional location filter (e.g., "Tel Aviv")
+            location: Optional location filter (e.g., "Tel Aviv", "Jerusalem")
             num_jobs: Number of jobs to return (default: 20)
+
+        Returns:
+            List of Job objects
+        """
+        if not self.adzuna_app_id or not self.adzuna_app_key:
+            print("⚠️  Adzuna API not configured, skipping...")
+            return []
+
+        import requests
+
+        print(f"🔍 Searching Adzuna for: {job_title}")
+        if location:
+            print(f"📍 Location: {location}")
+
+        # Determine country code
+        # If location contains Israel-related terms, use "il" (Israel)
+        country = "il"  # Default to Israel
+        if location:
+            location_lower = location.lower()
+            if any(term in location_lower for term in ["israel", "ישראל", "tel aviv", "jerusalem", "haifa"]):
+                country = "il"
+
+        # Build API URL
+        # Format: https://api.adzuna.com/v1/api/jobs/{country}/search/{page}
+        page = 1
+        url = f"https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
+
+        # Build parameters
+        params = {
+            "app_id": self.adzuna_app_id,
+            "app_key": self.adzuna_app_key,
+            "what": job_title,  # Job search keyword
+            "results_per_page": min(num_jobs, 50),  # Max 50 per page
+            "content-type": "application/json"
+        }
+
+        # Add location if specified
+        if location:
+            params["where"] = location
+
+        try:
+            print(f"🚀 Calling Adzuna API (country={country})")
+            response = requests.get(url, params=params, timeout=30)
+
+            if response.status_code != 200:
+                print(f"❌ Adzuna API error: {response.status_code}")
+                print(f"   Response: {response.text[:200]}")
+                return []
+
+            data = response.json()
+            results = data.get("results", [])
+
+            print(f"✅ Adzuna returned {len(results)} jobs from Israel")
+
+            # Convert to Job objects
+            jobs = []
+            for item in results[:num_jobs]:
+                # Extract location
+                location_display = item.get("location", {}).get("display_name", location or "Israel")
+
+                # Extract description
+                description = item.get("description", "No description available")
+
+                # Build job object
+                job = Job(
+                    title=item.get("title", "Unknown"),
+                    company=item.get("company", {}).get("display_name", "Unknown"),
+                    location=location_display,
+                    description=description,
+                    url=item.get("redirect_url", ""),
+                    posted_date=item.get("created"),
+                    source="adzuna"
+                )
+                jobs.append(job)
+
+            return jobs
+
+        except requests.exceptions.Timeout:
+            print("❌ Adzuna API timeout")
+            return []
+        except Exception as e:
+            print(f"❌ Adzuna API error: {str(e)}")
+            return []
+
+    async def search(
+        self,
+        job_title: str,
+        location: Optional[str] = None,
+        num_jobs: int = 20,
+        experience_level: str = "Mid"
+    ) -> List[Job]:
+        """
+        Main method: Search for jobs with SMART QUERY EXPANSION + MULTI-SOURCE SEARCH
+
+        Strategy:
+        1. Expand user query to 3-5 formal job titles (e.g., "ai student" → ["AI Intern", "Junior AI Engineer", ...])
+        2. Search each expanded query via:
+           - JSearch API (job boards)
+           - Brave Search (web-wide)
+        3. Combine and deduplicate results
+
+        Args:
+            job_title: Job title to search for (informal OK! e.g., "ai student", "python dev")
+            location: Optional location filter (e.g., "Israel", "Tel Aviv", "Remote")
+            num_jobs: Number of jobs to return (default: 20)
+            experience_level: Experience level to target ("Junior", "Mid", "Senior", "Lead")
 
         Returns:
             List of Job objects
 
         Example:
             scraper = JobScraper()
-            jobs = await scraper.search("Python Developer", location="Tel Aviv", num_jobs=10)
+            jobs = await scraper.search("ai student", location="Remote", num_jobs=10, experience_level="Junior")
         """
-        print(f"🔍 Searching for: {job_title}")
+        print(f"\n🔍 Smart Job Search Started")
+        print(f"   User Query: '{job_title}'")
         if location:
-            print(f"📍 Location: {location}")
-        print(f"📊 Requested jobs: {num_jobs}\n")
+            print(f"   Location: {location}")
+        print(f"   Requested: {num_jobs} jobs")
+        print(f"   Experience Level: {experience_level}")
+        print(f"   Sources: ", end="")
+        sources = []
+        if self.use_jsearch:
+            sources.append("JSearch")
+        if self.use_brave_search:
+            sources.append("Brave Search")
+        print(", ".join(sources) + "\n")
 
-        # Use JSearch API
-        jobs = await self._search_jsearch_api(job_title, location, num_jobs)
+        # Step 1: Expand query to multiple formal job titles with experience level targeting
+        expanded_queries = self._expand_job_query(job_title, experience_level)
 
-        print(f"✅ Found {len(jobs)} jobs!\n")
+        # Step 2: Calculate how many jobs to get from each source
+        active_sources = sum([self.use_jsearch, self.use_brave_search, self.use_firecrawl])
 
-        return jobs
+        if active_sources == 0:
+            print("   ❌ No job search sources available!")
+            return []
+
+        # Split jobs evenly between sources
+        jobs_per_source = num_jobs // active_sources if active_sources > 0 else num_jobs
+
+        # Collect jobs from each source separately to ensure balanced results
+        jsearch_all_jobs = []
+        brave_all_jobs = []
+        firecrawl_all_jobs = []
+
+        # Step 2: Search each expanded query across multiple sources
+        jobs_per_query = max(5, jobs_per_source // len(expanded_queries))  # Get at least 5 per query
+
+        for i, query in enumerate(expanded_queries, 1):
+            print(f"\n📋 Query {i}/{len(expanded_queries)}: '{query}'")
+
+            # Search JSearch if available
+            if self.use_jsearch:
+                try:
+                    jsearch_jobs = await self._search_jsearch_api(query, location, jobs_per_query)
+                    jsearch_all_jobs.extend(jsearch_jobs)
+                    print(f"   ✅ JSearch: {len(jsearch_jobs)} jobs")
+                except Exception as e:
+                    print(f"   ⚠️  JSearch failed: {e}")
+
+            # Search Brave Search if available
+            if self.use_brave_search:
+                try:
+                    brave_jobs = await self.brave_agent.search_jobs(query, location, jobs_per_query)
+                    brave_all_jobs.extend(brave_jobs)
+                    print(f"   ✅ Brave Search: {len(brave_jobs)} jobs")
+                except Exception as e:
+                    print(f"   ⚠️  Brave Search failed: {e}")
+
+            # Search FireCrawl if available
+            if self.use_firecrawl:
+                try:
+                    firecrawl_jobs = await self.firecrawl_scraper.search(query, location, jobs_per_query)
+                    firecrawl_all_jobs.extend(firecrawl_jobs)
+                    print(f"   ✅ FireCrawl: {len(firecrawl_jobs)} jobs")
+                except Exception as e:
+                    print(f"   ⚠️  FireCrawl failed: {e}")
+
+        # Step 3: Deduplicate each source separately
+        def deduplicate_jobs(jobs_list):
+            seen_urls = set()
+            seen_jobs = set()
+            unique = []
+
+            for job in jobs_list:
+                job_id = (job.title.lower(), job.company.lower())
+
+                if job.url and job.url in seen_urls:
+                    continue
+                if job_id in seen_jobs:
+                    continue
+
+                if job.url:
+                    seen_urls.add(job.url)
+                seen_jobs.add(job_id)
+                unique.append(job)
+
+            return unique
+
+        # Deduplicate each source
+        jsearch_unique = deduplicate_jobs(jsearch_all_jobs)
+        brave_unique = deduplicate_jobs(brave_all_jobs)
+        firecrawl_unique = deduplicate_jobs(firecrawl_all_jobs)
+
+        # Step 4: Distribute jobs evenly from all active sources
+        final_jobs = []
+
+        # Add from each source proportionally
+        if active_sources > 0:
+            jsearch_limit = min(len(jsearch_unique), jobs_per_source) if self.use_jsearch else 0
+            brave_limit = min(len(brave_unique), jobs_per_source) if self.use_brave_search else 0
+            firecrawl_limit = min(len(firecrawl_unique), jobs_per_source) if self.use_firecrawl else 0
+
+            # If one source has fewer jobs, redistribute to others
+            total_available = jsearch_limit + brave_limit + firecrawl_limit
+            if total_available < num_jobs:
+                # Take all available
+                final_jobs.extend(jsearch_unique[:jsearch_limit])
+                final_jobs.extend(brave_unique[:brave_limit])
+                final_jobs.extend(firecrawl_unique[:firecrawl_limit])
+            else:
+                # Distribute evenly
+                final_jobs.extend(jsearch_unique[:jsearch_limit])
+                final_jobs.extend(brave_unique[:brave_limit])
+                final_jobs.extend(firecrawl_unique[:firecrawl_limit])
+
+        print(f"\n✅ Total unique jobs found: {len(final_jobs)}")
+        print(f"   Original query: '{job_title}'")
+        print(f"   Expanded to: {len(expanded_queries)} searches")
+        print(f"   Sources: {', '.join(sources)}")
+        if self.use_jsearch:
+            print(f"   JSearch: {len(jsearch_unique)} unique")
+        if self.use_brave_search:
+            print(f"   Brave Search: {len(brave_unique)} unique")
+        if self.use_firecrawl:
+            print(f"   FireCrawl: {len(firecrawl_unique)} unique")
+        print(f"   Result: {len(final_jobs)} total jobs\n")
+
+        return final_jobs[:num_jobs]
 
 
 # Example usage (for testing)

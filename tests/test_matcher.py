@@ -4,6 +4,7 @@ Comprehensive tests for Agent 4: Smart Matcher
 
 import pytest
 import asyncio
+from unittest.mock import Mock, MagicMock, patch
 from agents.matcher import SmartMatcher
 from models.models import CVAnalysis, Job, CompanyInsights, JobMatch
 
@@ -110,6 +111,103 @@ class TestSkillOverlap:
         overlap, missing = self.matcher._calculate_skill_overlap(cv_skills, job_desc)
 
         assert len(overlap) == 2
+
+
+class TestBatchEmbeddings:
+    """Test batch embeddings functionality"""
+
+    def setup_method(self):
+        """Initialize matcher for each test"""
+        self.matcher = SmartMatcher()
+
+    @patch('agents.matcher.SmartMatcher._create_embeddings_batch')
+    def test_batch_embeddings_called_once(self, mock_batch):
+        """Test that batch embeddings is called once for all jobs"""
+        # Setup mock return value
+        mock_batch.return_value = [
+            [0.1, 0.2, 0.3],  # Job 1 embedding
+            [0.4, 0.5, 0.6],  # Job 2 embedding
+            [0.7, 0.8, 0.9]   # Job 3 embedding
+        ]
+
+        texts = ["Job 1 description", "Job 2 description", "Job 3 description"]
+        embeddings = self.matcher._create_embeddings_batch(texts)
+
+        # Should be called once
+        mock_batch.assert_called_once()
+        assert len(embeddings) == 3
+
+    def test_batch_embeddings_returns_correct_count(self):
+        """Test that batch returns same number of embeddings as inputs"""
+        with patch.object(self.matcher.client.embeddings, 'create') as mock_create:
+            # Mock OpenAI response
+            mock_response = MagicMock()
+            mock_response.data = [
+                MagicMock(embedding=[0.1, 0.2]),
+                MagicMock(embedding=[0.3, 0.4]),
+                MagicMock(embedding=[0.5, 0.6])
+            ]
+            mock_create.return_value = mock_response
+
+            texts = ["Text 1", "Text 2", "Text 3"]
+            embeddings = self.matcher._create_embeddings_batch(texts)
+
+            assert len(embeddings) == 3
+            assert len(embeddings[0]) == 2
+            assert embeddings[0] == [0.1, 0.2]
+            assert embeddings[1] == [0.3, 0.4]
+            assert embeddings[2] == [0.5, 0.6]
+
+    def test_batch_embeddings_cleans_text(self):
+        """Test that batch embeddings cleans text properly"""
+        with patch.object(self.matcher.client.embeddings, 'create') as mock_create:
+            mock_response = MagicMock()
+            mock_response.data = [MagicMock(embedding=[0.1, 0.2])]
+            mock_create.return_value = mock_response
+
+            # Text with extra whitespace
+            texts = ["Text   with    lots    of    spaces"]
+            self.matcher._create_embeddings_batch(texts)
+
+            # Check that the text was cleaned before being sent
+            called_with = mock_create.call_args[1]['input']
+            assert "   " not in called_with[0]  # No triple spaces
+
+    def test_batch_embeddings_truncates_long_text(self):
+        """Test that batch embeddings truncates very long text"""
+        with patch.object(self.matcher.client.embeddings, 'create') as mock_create:
+            mock_response = MagicMock()
+            mock_response.data = [MagicMock(embedding=[0.1, 0.2])]
+            mock_create.return_value = mock_response
+
+            # Create text longer than 8000 chars
+            long_text = "x" * 10000
+            texts = [long_text]
+            self.matcher._create_embeddings_batch(texts)
+
+            # Check that text was truncated
+            called_with = mock_create.call_args[1]['input']
+            assert len(called_with[0]) <= 8000
+
+    def test_batch_embeddings_efficiency(self):
+        """Test that batch is more efficient than individual calls"""
+        with patch.object(self.matcher.client.embeddings, 'create') as mock_create:
+            mock_response = MagicMock()
+            mock_response.data = [
+                MagicMock(embedding=[0.1, 0.2]),
+                MagicMock(embedding=[0.3, 0.4]),
+                MagicMock(embedding=[0.5, 0.6]),
+                MagicMock(embedding=[0.7, 0.8]),
+                MagicMock(embedding=[0.9, 1.0])
+            ]
+            mock_create.return_value = mock_response
+
+            # Batch processing 5 texts
+            texts = [f"Text {i}" for i in range(5)]
+            self.matcher._create_embeddings_batch(texts)
+
+            # Should be called only ONCE for all 5 texts!
+            assert mock_create.call_count == 1
 
 
 class TestBaseScore:

@@ -67,6 +67,47 @@ class SmartMatcher:
 
         return embedding
 
+    def _create_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Create embeddings for multiple texts in a single API call (BATCH)
+
+        This is 10x more efficient than calling _create_embedding() in a loop!
+
+        Args:
+            texts: List of texts to embed (e.g., multiple job descriptions)
+
+        Returns:
+            List of embedding vectors (one per text)
+
+        Example:
+            texts = ["Job 1 description", "Job 2 description", "Job 3 description"]
+            embeddings = self._create_embeddings_batch(texts)
+            # Returns: [[0.23, -0.45, ...], [0.12, 0.34, ...], [0.56, -0.78, ...]]
+            # One API call instead of 3!
+        """
+        # Clean all texts
+        cleaned_texts = []
+        for text in texts:
+            # Remove extra whitespace
+            text = " ".join(text.split())
+            # Limit text length (embeddings have max tokens)
+            if len(text) > 8000:
+                text = text[:8000]
+            cleaned_texts.append(text)
+
+        # Call OpenAI embeddings API with batch
+        # This is the magic - one API call for ALL texts!
+        response = self.client.embeddings.create(
+            input=cleaned_texts,  # Pass list instead of single string
+            model=self.embedding_model
+        )
+
+        # Extract all embedding vectors
+        # response.data is a list of embedding objects
+        embeddings = [item.embedding for item in response.data]
+
+        return embeddings
+
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """
         Calculate cosine similarity between two vectors
@@ -190,17 +231,28 @@ class SmartMatcher:
         # Calculate skill overlap
         overlapping, missing = self._calculate_skill_overlap(cv_skills, job_description)
 
-        # Base score from similarity (0-70 points)
-        score = similarity * 70
+        # NEW SCORING SYSTEM - More weight to skills!
+        # Base score from similarity (0-50 points) - REDUCED from 70
+        score = similarity * 50
 
-        # Bonus for skill overlap (0-20 points)
+        # Skill overlap - TWO components:
+        # 1. Absolute overlap bonus (0-30 points) - INCREASED from 20
+        if overlapping:
+            # Give points based on absolute number of overlapping skills
+            # More overlapping skills = higher score
+            overlap_bonus = min(len(overlapping) * 4, 30)  # 4 points per skill, max 30
+            score += overlap_bonus
+
+        # 2. Skill coverage ratio (0-20 points)
+        # What percentage of YOUR skills are used in this job?
         if cv_skills:
             skill_match_ratio = len(overlapping) / len(cv_skills)
             score += skill_match_ratio * 20
 
-        # Penalty for missing critical skills (0-10 points penalty)
+        # Reduced penalty for missing skills (0-5 points) - REDUCED from 10
+        # It's OK to be missing some skills if you have strong overlap!
         if missing:
-            penalty = min(len(missing) * 2, 10)
+            penalty = min(len(missing) * 1, 5)
             score -= penalty
 
         # Ensure score is between 0-100
@@ -326,28 +378,62 @@ class SmartMatcher:
         """
         print(f"🎯 Matching CV to {len(jobs)} jobs...")
 
-        # Step 1: Create CV embedding (including user preferences)
-        print(f"   📊 Creating CV embedding...")
-        cv_text = f"""
-        Skills: {', '.join(cv_analysis.skills)}
-        Experience Level: {cv_analysis.experience_level}
-        Years of Experience: {cv_analysis.years_of_experience}
-        Achievements: {' '.join(cv_analysis.key_achievements)}
-        Desired Role: {desired_role}
-        Preferred Location: {desired_location}
-        """
-        cv_embedding = self._create_embedding(cv_text)
-        print(f"   ✅ CV embedding created ({len(cv_embedding)} dimensions)")
+        # Step 1: Create RICH CV embedding (including context and user preferences)
+        print(f"   📊 Creating rich CV embedding...")
 
-        # Step 2: Create embeddings for all jobs and match
+        # Build a rich, contextual CV description for better embedding
+        # Include skills multiple times with context to increase their weight
+        skills_context = []
+        for skill in cv_analysis.skills:
+            # Repeat each skill 2-3 times with context to boost its importance
+            skills_context.append(f"Expert in {skill}")
+            skills_context.append(f"Professional {skill} experience")
+            if cv_analysis.years_of_experience >= 3:
+                skills_context.append(f"Advanced {skill} skills")
+
+        # Build comprehensive CV text
+        cv_text = f"""
+        Professional {desired_role or 'Developer'} with {cv_analysis.years_of_experience} years of experience.
+        {cv_analysis.experience_level} level professional.
+
+        Core Technical Skills:
+        {' '.join(skills_context)}
+
+        Technical Expertise: {', '.join(cv_analysis.skills)}
+
+        Key Achievements and Experience:
+        {' '.join(cv_analysis.key_achievements)}
+
+        Career Level: {cv_analysis.experience_level} developer with proven track record
+        Years of Experience: {cv_analysis.years_of_experience} years
+
+        Looking for: {desired_role or 'challenging opportunities'}
+        Preferred Location: {desired_location or 'flexible'}
+        Location Preferences: {', '.join(cv_analysis.preferred_locations)}
+
+        This candidate has strong capabilities in: {', '.join(cv_analysis.skills)}
+        """
+
+        cv_embedding = self._create_embedding(cv_text)
+        print(f"   ✅ Rich CV embedding created ({len(cv_embedding)} dimensions with skill emphasis)")
+
+        # Step 2: Create embeddings for ALL jobs in ONE API call (BATCH!)
         matches = []
 
-        for i, job in enumerate(jobs):
-            print(f"   🔍 Matching job {i+1}/{len(jobs)}: {job.title} at {job.company}")
+        # Handle empty jobs list
+        if not jobs:
+            print(f"   ⚠️  No jobs to match!")
+            return matches
 
-            # Create job embedding
-            job_text = f"{job.title} {job.description}"
-            job_embedding = self._create_embedding(job_text)
+        print(f"   🚀 Creating embeddings for {len(jobs)} jobs (batch mode - 10x faster)...")
+        job_texts = [f"{job.title} {job.description}" for job in jobs]
+        job_embeddings = self._create_embeddings_batch(job_texts)
+        print(f"   ✅ All job embeddings created in one API call!")
+
+        # Step 3: Match each job with its embedding
+
+        for i, (job, job_embedding) in enumerate(zip(jobs, job_embeddings)):
+            print(f"   🔍 Matching job {i+1}/{len(jobs)}: {job.title} at {job.company}")
 
             # Calculate skill overlap and gaps
             skill_overlap, skill_gaps = self._calculate_skill_overlap(

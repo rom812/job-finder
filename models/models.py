@@ -65,9 +65,8 @@ class CVAnalysis(BaseModel):
 
 
 # ============================================================================
-# TODO: Model 2 - Job
-# ============================================================================# YOUR TURN! Write the Job model here# Hint: Look at ARCHITECTURE.md lines 277-285
-# Fields needed: title, company, location, description, url, posted_date, source
+# Model 2: Job
+# ============================================================================
 class Job(BaseModel):
     title: str
     company: str
@@ -75,14 +74,13 @@ class Job(BaseModel):
     description: str
     url: str
     posted_date: Optional[str] = None
-    source: Literal["linkedin", "indeed", "direct", "jsearch"] = "direct"
+    source: Literal["linkedin", "indeed", "direct", "jsearch", "brave_search", "adzuna", "firecrawl"] = "direct"
 
 
 
 # ============================================================================
-# TODO: Model 3 - CompanyInsights
-# ============================================================================# YOUR TURN! Write the CompanyInsights model here
-# Fields needed: company_name, reddit_sentiment, reddit_highlights, recent_news, culture_notes, data_source
+# Model 3: CompanyInsights
+# ============================================================================
 class CompanyInsights(BaseModel):
     company_name: str
     reddit_sentiment: Literal["positive", "neutral", "negative"] = "neutral"
@@ -90,10 +88,15 @@ class CompanyInsights(BaseModel):
     recent_news: List[str] = Field(default_factory=list)
     culture_notes: List[str] = Field(default_factory=list)
     data_source: str = "multiple"
+
+    # AI-generated insights for interview prep
+    ai_summary: Optional[str] = Field(
+        default=None,
+        description="AI-generated intelligent summary and interview prep insights"
+    )
 # ============================================================================
-# TODO: Model 4 - JobMatch
+# Model 4: JobMatch
 # ============================================================================
-# Fields needed: job, company_insights, match_score, skill_overlap, skill_gaps, recommendation, reasoning
 class JobMatch(BaseModel):
     job: Job
     company_insights: CompanyInsights

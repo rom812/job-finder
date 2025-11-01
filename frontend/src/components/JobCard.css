@@ -317,6 +317,39 @@
   margin-bottom: 1rem;
 }
 
+.ai-insights {
+  background: rgba(102, 126, 234, 0.08);
+  border-left: 3px solid #667eea;
+  padding: 1rem;
+  border-radius: 6px;
+  margin-top: 0.5rem;
+}
+
+.insight-bullet {
+  color: #d0d0d0;
+  padding: 0.4rem 0;
+  padding-left: 1rem;
+  position: relative;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
+.insight-bullet::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: #667eea;
+  font-size: 1.2rem;
+  font-weight: bold;
+}
+
+.insight-text {
+  color: #c0c0c0;
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+}
+
 .highlights-list,
 .news-list {
   list-style: none;

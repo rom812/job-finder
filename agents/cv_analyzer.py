@@ -162,7 +162,8 @@ Return ONLY valid JSON, no additional text."""
         response = self.client.chat.completions.create(
             model=self.model,
             messages=messages,
-            response_format={"type": "json_object"}  # Request JSON response
+            response_format={"type": "json_object"},  # Request JSON response
+            timeout=120  # 2 minutes timeout to prevent hanging
         )
         print(f"✅ Received response from OpenAI")
 

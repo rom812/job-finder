@@ -114,7 +114,23 @@ function JobCard({ match, rank }) {
 
           <div className="details-section">
             <h4>Company Insights</h4>
-            {match.company_insights.reddit_highlights.length > 0 && (
+            {match.company_insights.ai_summary ? (
+              <div className="insights-group">
+                <h5>Interview Prep Insights</h5>
+                <div className="ai-insights">
+                  {match.company_insights.ai_summary.split('\n').map((line, idx) => {
+                    // Skip empty lines
+                    if (!line.trim()) return null;
+                    // Check if it's a bullet point
+                    if (line.trim().startsWith('•') || line.trim().startsWith('-')) {
+                      return <div key={idx} className="insight-bullet">{line.trim()}</div>;
+                    }
+                    // Otherwise render as paragraph
+                    return <p key={idx} className="insight-text">{line}</p>;
+                  })}
+                </div>
+              </div>
+            ) : match.company_insights.reddit_highlights.length > 0 && (
               <div className="insights-group">
                 <h5>Reddit Highlights</h5>
                 <ul className="highlights-list">

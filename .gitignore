@@ -55,6 +55,10 @@ env/
 
 # Environment variables
 .env
+.env.local
+
+# MCP local overrides (if needed)
+.mcp.local.json
 
 # OS
 .DS_Store

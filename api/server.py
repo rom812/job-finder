@@ -52,10 +52,17 @@ def run_pipeline():
     global latest_matches, search_config
 
     try:
-        # Get form data
+        # Get personal details
+        full_name = request.form.get('full_name', '')
+        email = request.form.get('email', '')
+        phone = request.form.get('phone', '')
+        years_of_experience = request.form.get('years_of_experience', '')
+
+        # Get job search parameters
         job_title = request.form.get('job_title', '')
         location = request.form.get('location', '')
-        num_jobs = int(request.form.get('num_jobs', 20))
+        job_level = request.form.get('job_level', '')
+        num_jobs = int(request.form.get('num_jobs', 5))
 
         # Handle CV file upload (optional)
         cv_path = "cvs/romCV.pdf"  # Default CV
@@ -70,15 +77,51 @@ def run_pipeline():
         # Validation
         if not job_title:
             return jsonify({'error': 'job_title is required'}), 400
+        if not full_name:
+            return jsonify({'error': 'full_name is required'}), 400
+        if not email:
+            return jsonify({'error': 'email is required'}), 400
+
+        # Store user info for potential future use
+        user_info = {
+            'full_name': full_name,
+            'email': email,
+            'phone': phone,
+            'years_of_experience': years_of_experience
+        }
+
+        # Construct search query with job level
+        search_query = job_title
+        if job_level:
+            # Map job level to search terms
+            level_map = {
+                'student': 'student intern entry-level',
+                'junior': 'junior entry-level',
+                'senior': 'senior'
+            }
+            level_term = level_map.get(job_level, '')
+            if level_term:
+                search_query = f"{level_term} {job_title}"
+
+        print(f"\n{'='*80}")
+        print(f"🔍 New Job Search Request")
+        print(f"{'='*80}")
+        print(f"👤 User: {full_name} ({email})")
+        print(f"💼 Job Level: {job_level or 'Not specified'}")
+        print(f"🎯 Looking for: {job_title}")
+        print(f"🔍 Search Query: {search_query}")
+        print(f"📍 Location: {location}")
+        print(f"📄 CV: {cv_path}")
+        print(f"{'='*80}\n")
 
         # Run pipeline asynchronously
         import asyncio
-        pipeline = JobFinderPipeline(use_mock_data=False)
+        pipeline = JobFinderPipeline()
 
-        # Run the pipeline
+        # Run the pipeline with the modified search query
         matches = asyncio.run(pipeline.run(
             cv_path=cv_path,
-            job_title=job_title,
+            job_title=search_query,
             location=location,
             num_jobs=num_jobs
         ))
@@ -89,13 +132,15 @@ def run_pipeline():
             'role': job_title,
             'location': location,
             'cv_analyzed': True,
-            'num_jobs': len(matches)
+            'num_jobs': len(matches),
+            'user': user_info
         }
 
         return jsonify({
             'matches': [match_to_dict(m) for m in matches],
             'config': search_config,
-            'message': f'Found {len(matches)} job matches'
+            'user_info': user_info,
+            'message': f'Found {len(matches)} job matches for {full_name}'
         })
 
     except Exception as e:
@@ -137,7 +182,8 @@ def match_to_dict(match):
             'reddit_highlights': match.company_insights.reddit_highlights,
             'recent_news': match.company_insights.recent_news,
             'culture_notes': match.company_insights.culture_notes,
-            'data_source': match.company_insights.data_source
+            'data_source': match.company_insights.data_source,
+            'ai_summary': match.company_insights.ai_summary
         },
         'match_score': match.match_score,
         'skill_overlap': match.skill_overlap,
@@ -158,8 +204,8 @@ async def load_initial_data():
     print("🚀 Loading initial job matches data...")
     print("=" * 80)
 
-    # Create pipeline with mock data for faster startup
-    pipeline = JobFinderPipeline(use_mock_data=True)
+    # Create pipeline
+    pipeline = JobFinderPipeline()
 
     # Run a sample search
     cv_path = "cvs/romCV.pdf"
@@ -193,13 +239,13 @@ async def load_initial_data():
         print("=" * 80 + "\n")
 
 
-def start_server(host='0.0.0.0', port=5000, load_data=True):
+def start_server(host='0.0.0.0', port=5001, load_data=True):
     """
     Start the Flask server
 
     Args:
         host: Host to bind to (default: 0.0.0.0)
-        port: Port to bind to (default: 5000)
+        port: Port to bind to (default: 5001)
         load_data: Whether to load initial data (default: True)
     """
     if load_data:
@@ -223,7 +269,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Job Finder API Server')
     parser.add_argument('--host', default='0.0.0.0', help='Host to bind to')
-    parser.add_argument('--port', type=int, default=5000, help='Port to bind to')
+    parser.add_argument('--port', type=int, default=5001, help='Port to bind to')
     parser.add_argument('--no-load', action='store_true', help='Skip loading initial data')
 
     args = parser.parse_args()
