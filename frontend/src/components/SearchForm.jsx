@@ -55,7 +55,8 @@ function SearchForm({ onSearch, initialConfig }) {
         formDataToSend.append('cv_file', formData.cvFile)
       }
 
-      const response = await fetch('http://localhost:5001/api/run-pipeline', {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5001'
+      const response = await fetch(`${apiUrl}/api/run-pipeline`, {
         method: 'POST',
         body: formDataToSend
       })

@@ -1,0 +1,1 @@
+web: python api/server.py --host 0.0.0.0 --port $PORT --no-load
