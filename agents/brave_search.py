@@ -240,12 +240,28 @@ class BraveSearchAgent:
             "vetted engineers"
         ]
 
+        # NEW: Skip titles that indicate generic job board search results
+        # These are search result pages, not individual job postings
+        skip_title_patterns = [
+            " jobs in ",              # "793 AI Engineer jobs in Paris"
+            " Jobs in ",              # "937 AI Jobs in France"
+            " job openings",          # "100 job openings in..."
+            " Job Openings",
+            "search results",
+            "Search Results",
+            " positions in ",
+            " Positions in "
+        ]
+
         # Skip URLs that are profiles, not job postings
         skip_url_patterns = [
             "linkedin.com/in/",      # Personal LinkedIn profiles
             "/profile/",             # General profile pages
             "/resume/",              # Resume pages
             "/cv/",                  # CV pages
+            "/jobs?",                # LinkedIn/Indeed job search pages
+            "/jobs/search",          # Job search result pages
+            "glassdoor.com/Job/",    # Glassdoor search pages
         ]
 
         for result in results:
@@ -257,7 +273,12 @@ class BraveSearchAgent:
 
                 # Skip LinkedIn profiles and similar
                 if any(pattern in url.lower() for pattern in skip_url_patterns):
-                    print(f"   ⏭️  Skipping profile page: {title[:50]}...")
+                    print(f"   ⏭️  Skipping profile/search page: {title[:50]}...")
+                    continue
+
+                # NEW: Skip generic job board search result pages (not individual jobs)
+                if any(pattern in title for pattern in skip_title_patterns):
+                    print(f"   ⏭️  Skipping job board search page: {title[:60]}...")
                     continue
 
                 # Skip if this looks like an article about hiring, not a job posting

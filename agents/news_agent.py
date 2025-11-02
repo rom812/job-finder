@@ -529,6 +529,18 @@ Write the structured brief now:"""
             agent = NewsAgent()
             insights = await agent.get_insights("Nvidia", role="Software Engineer")
         """
+        # Skip research for "Unknown Company" - it's a placeholder, not a real company
+        if company_name == "Unknown Company" or not company_name or company_name.strip() == "":
+            print(f"⏭️  Skipping research for '{company_name}' (not a specific company)")
+            return CompanyInsights(
+                company_name=company_name,
+                reddit_sentiment="neutral",
+                reddit_highlights=[],
+                recent_news=[],
+                culture_notes=[],
+                data_source="skipped"
+            )
+
         print(f"🔍 Researching company: {company_name}")
 
         # Use FireCrawl with timeout protection
